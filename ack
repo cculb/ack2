@@ -25,6 +25,7 @@ use App::Ack::Filter::Extension;
 use App::Ack::Filter::FirstLineMatch;
 use App::Ack::Filter::Inverse;
 use App::Ack::Filter::Is;
+use App::Ack::Filter::IsPath;
 use App::Ack::Filter::Match;
 use App::Ack::Filter::Collection;
 
@@ -47,6 +48,9 @@ our $opt_L;
 our $opt_l;
 our $opt_passthru;
 our $opt_column;
+
+my @FILE_FILTERS = qw(is match ext firstlinematch);
+my @DIR_FILTERS  = qw(is match ext);
 
 # These are all our globals.
 
@@ -95,8 +99,9 @@ MAIN: {
     main();
 }
 
+# XXX this should probably work with process_filter_spec
 sub _compile_filters {
-    my ( $filter_specs ) = @_;
+    my ( $filter_specs, $context, $allowed ) = @_;
 
     return unless $filter_specs && @{$filter_specs};
 
@@ -107,9 +112,14 @@ sub _compile_filters {
             my ($how,$what) = ($1,$2);
             my $filter = App::Ack::Filter->create_filter($how, split(/,/, $what));
             $filter_collection->add($filter);
+
+            # XXX regex match? =(
+            if ( $how eq 'is' && $context =~ /ignore-dir/ ) {
+                $filter_collection->add(App::Ack::Filter::IsPath->new($what));
+            }
         }
         else {
-            Carp::croak( qq{Invalid filter specification "$filter_spec"} );
+            Carp::croak( qq{Invalid filter specification "$filter_spec" for option '$context'} );
         }
     }
 
@@ -137,7 +147,7 @@ sub _compile_descend_filter {
 sub _compile_file_filter {
     my ( $opt, $start ) = @_;
 
-    my $ifiles_filters = _compile_filters($opt->{ifiles} || []) || App::Ack::Filter::Collection->new();
+    my $ifiles_filters = _compile_filters($opt->{ifiles} || [], '--ignore-file', \@FILE_FILTERS) || App::Ack::Filter::Collection->new();
 
     my $filters         = $opt->{'filters'} || [];
     my $direct_filters = App::Ack::Filter::Collection->new();
@@ -157,7 +167,7 @@ sub _compile_file_filter {
 
     # XXX we only care about this if $dont_ignore_dir_list is not empty
     my $ignore_dir_filter      = $opt->{idirs};
-    my $dont_ignore_dir_filter = _compile_filters($opt->{no_ignore_dirs});
+    my $dont_ignore_dir_filter = _compile_filters($opt->{no_ignore_dirs}, '--no-ignoredir', \@DIR_FILTERS);
 
     return sub {
         if ( $opt_g ) {
@@ -1045,7 +1055,7 @@ sub main {
                 }
             }
 
-            $opt->{idirs} = _compile_filters($opt->{idirs});
+            $opt->{idirs} = _compile_filters($opt->{idirs}, '--ignore-dir', \@DIR_FILTERS);
 
             $opt->{file_filter}    = _compile_file_filter($opt, \@start);
             $opt->{descend_filter} = _compile_descend_filter($opt);
